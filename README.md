@@ -7,7 +7,8 @@ Los datos utilizados pertenecen a un estudio de la **European Social Survey (ESS
 Dichos datos han sido obtenidos de la base de datos original, adjuntada al presente repositorio (*CRON2W4e01*), depurando y almacenando los mismos en una nueva base de datos (*estudio*) para un mejor manejo.
 
 ## DATOS DE INTERÉS
-Felicidad (*w4q50*), País (*cntry*), Género (*gndr*), Frecuencia de uso internet (*netusoft*), Actividad principal últimos 7 días (*mnactic*), Sentimientos sobre ingresos (*hincfel*), Nivel de educación (*eisced*).
+Variables: Felicidad (*w4q50*), País (*cntry*), Género (*gndr*), Frecuencia de uso internet (*netusoft*), Actividad principal últimos 7 días (*mnactic*), Sentimientos sobre ingresos (*hincfel*), Nivel de educación (*eisced*).
+
 Variable técnica [se usará con fines de validez de los cálculos a realizar]: Peso muestral (*c2weight*)
 
 ## OBJETIVOS
