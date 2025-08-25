@@ -1,0 +1,154 @@
+---
+title: "Depuración y preparación de datos"
+author: "Mario Vega"
+date: 
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+#CARGA DEL DATASET Y VISUALIZACIÓN INICIAL
+```{r}
+datos <- read.csv('CRON2W4e01.csv', header=TRUE)
+View(datos)
+nrow(datos)
+#vemos que el archivo contiene un total de 6032 sujetos/observaciones
+```
+
+#SELECCIÓN DE VARIABLES DE INTERÉS PARA EL ESTUDIO
+-Por un lado, cogeremos las variables geográficas, demográficas, económicas. Además incluiremos por si acaso la variable de peso muestral (c2weight) por cuestiones técnicas.
+-Por otro lado, cogeremos aquella variable psicológica tipo Likert relacionadas con felicidad.
+
+Sin embargo, sobre las variables psicológicas, el interés principal del estudio girará en torno al ítem w4q50 concretamente, que alude directamente a una pregunta sobre felicidad ("Durante la semana pasada, ¿con qué frecuencia te sentiste feliz?"). 
+```{r}
+#Variables sociales
+social <- c("cntry","c2weight","gndr","eisced","netusoft","mnactic","hincfel")
+#Variables psicológicas
+psyco <- c("w4q50")
+
+#Creación del nuevo dataframe sobre el que desarrollar el estudio
+estudio <- datos[, c(social, psyco)]
+```
+
+
+#COMPROBACIÓN DE VALORES NA, Y EN CASO AFIRMATIVO, TRANSFORMARLOS
+```{r}
+# 1º - IDENTIFICAR COLUMNAS AFECTADAS
+if (any(is.na(estudio))) {
+  cat("Se encontraron valores NA o NaN en las posiciones:\n")
+  print(which(is.na(estudio), arr.ind=TRUE))
+  #arr.ind devuelve una matriz con dos columnas (1ª corresponde a la fila; 2ª a la columna)
+} else {
+  cat("No se encontraron valores NA o NaN")
+}
+```
+
+#PREPROCESAMIENTO Y/O TRANSFORMACIÓN DE DATOS
+-VARIABLE w4q50 ("Durante la semana pasada, ¿con qué frecuencia te sentiste feliz?")
+Esta variable contiene un valor de respuesta igual a 9, el cual representa la categoría "Sin respuesta".
+El objetivo es ver cuántos resultados contienen dicho valor, por lo que extraeremos una tabla de proporciones.
+Si el nº de resultados con valor 9 es reducido (por ejemplo, inferior a un 5% del total de la muestra) optaremos por eliminar dichas observaciones
+```{r}
+round(prop.table(table(estudio$w4q50)),3) * 100
+```
+Vemos que la cantidad de valores "Sin respuesta" es reducido, por lo que procederemos a su eliminación de la muestra
+```{r}
+#seleccionaremos todas aquellas filas exhentas de resultados 9 en dicha variable
+estudio <- estudio[estudio$w4q50 != 9,]
+```
+
+
+-EXPLORACIÓN DE DATOS (OPCIONES DE RESPUESTA)
+En esta sección investigaremos de manera superficial algunos de los resultados obtenidos en algunas variables
+```{r}
+#PAISES
+unique(estudio$cntry)
+
+#USO NETFLIX
+unique(estudio$netusoft)
+
+#ACTIVIDAD PRINCIPAL ÚLTIMA SEMANA
+unique(estudio$mnactic)
+```
+
+
+-VARIABLE gndr (Género)
+Contaremos cuántas observaciones inluyen el valor 9, representando "Sin respuesta"
+```{r}
+sum(estudio$gndr == 9)
+```
+
+
+#APROXIMACIÓN BOTTOM-UP
+-PROPORCIÓN DE PAISES
+```{r}
+# TABLA DE FRECUENCIAS
+pais <- round(prop.table(table(estudio$cntry)),3) * 100
+pais
+#Austria 10.9%
+#Bélgica 9.6%
+#R.Checa 4.5%
+#Finlandia 12.4%
+#Francia 12%
+#R.Unido 8.1%
+#Islandia 8.8%
+#Italia 4%
+#Portugal 6.4%
+#Suecia 14%
+#Eslovenia 9.4%
+
+# GRÁFICO DE BARRAS
+barplot(pais)
+```
+Podemos ver por tanto que países como Austria, Finlandia, Francia y Suecia encabezan la muestra con mayores números de población entrevistada. Por su parte, países como Rep.Checa o Italia representan una menor cantidad de participantes
+
+
+-PROPORCIÓN DE GÉNERO
+```{r}
+genero <- round(prop.table(table(estudio$gndr)),3) * 100
+genero
+barplot(genero)
+```
+De la muestra europea en su totalidad, existe un balance muy equilibrado entre encuestados en cuanto a género.
+
+
+-VARIABLE netusoft (Frecuencia uso internet) EN PROPORCIÓN POR PAÍS
+Exploraremos una relación biavariante para acercarnos aún más a los datos.
+Esta cuestión obedece también a asegurar que no existen desequilibrios por exceso de resultados 'inútiles' (como valores 8 o 9)
+```{r}
+# TABLA DE FRECUENCIAS
+relac <- table(estudio$cntry, estudio$netusoft)
+relac 
+
+#GRÁFICO DE MOSAICO
+library(grid)
+library(vcd)
+
+mosaic(relac,
+       shade = TRUE, #aplica sombreado (indicar la fuerza y dirección de la asociación entre las variables)
+       legend = TRUE, #mostrará la relación entre los residuos Pearson y su significancia en una paleta de colores
+       labeling_args = list(rot_labels = c(90, 0)),
+       main = "Frecuencia uso internet por país"
+       )
+```
+
+
+#TRANSFORMACIÓN DE VALORES `INÚTILES´(0, 77, 88, 99, etc) A NA
+CONVERSIÓN A NA de todos aquellos valores faltantes o inútiles (codificados en las variables de interés como 9, 55, 77, etc) en cuanto a respuestas susceptibles de análisis ("No aplica", Sin respuesta", "No sabe", etc).
+```{r}
+estudio$gndr[estudio$gndr == 9] <- NA 
+estudio$netusoft[estudio$netusoft %in% c(7, 8, 9)] <- NA
+estudio$mnactic[estudio$mnactic %in% c(66, 77, 88, 99)] <- NA
+estudio$hincfel[estudio$hincfel %in% c(7, 8, 9)] <- NA
+estudio$eisced[estudio$eisced %in% c(0, 55, 77, 88, 99)] <- NA
+```
+
+
+#EXPORTAR BASE DE DATOS DEPURADA
+Para trabajar de forma definitiva en las futuras visualizaciones, se exportará un nuevo dataset en representación de los datos depurados
+```{r}
+
+```
+
