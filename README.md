@@ -15,5 +15,7 @@ Variable técnica [se usará con fines de validez de los cálculos a realizar]: 
 -Mostrar la distribución geográfica europea de los niveles de felicidad de la población encuestada.
 ## Objetivos específicos:
 -Comparar niveles de felicidad entre hombres y mujeres
+
 -¿Qué tipo de actividades reflejan más felicidad?
+
 -Ver cómo se como se comporta la percepción de ingresos, el nivel de uso de internet, o el nivel educativo, con la felicidad.
