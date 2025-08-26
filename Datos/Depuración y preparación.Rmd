@@ -7,6 +7,8 @@ output: html_document
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
+#con here() aseguramos ruta segura a la raíz del proyecto
+library(here) 
 ```
 
 #CARGA DEL DATASET Y VISUALIZACIÓN INICIAL
@@ -18,14 +20,14 @@ nrow(datos)
 ```
 
 #SELECCIÓN DE VARIABLES DE INTERÉS PARA EL ESTUDIO
--Por un lado, cogeremos las variables geográficas, demográficas, económicas. Además incluiremos por si acaso la variable de peso muestral (c2weight) por cuestiones técnicas.
--Por otro lado, cogeremos aquella variable psicológica tipo Likert relacionadas con felicidad.
+-Por un lado, cogeremos las variables geográficas, demográficas, económicas... de interés. Además incluiremos por si acaso la variable de peso muestral (c2weight) por cuestiones técnicas.
+-Por otro lado, cogeremos aquella variable psicológica tipo Likert relacionada con felicidad.
 
-Sin embargo, sobre las variables psicológicas, el interés principal del estudio girará en torno al ítem w4q50 concretamente, que alude directamente a una pregunta sobre felicidad ("Durante la semana pasada, ¿con qué frecuencia te sentiste feliz?"). 
+El interés principal del estudio girará en torno al ítem w4q50 concretamente, que alude directamente a una pregunta sobre felicidad ("Durante la semana pasada, ¿con qué frecuencia te sentiste feliz?"). 
 ```{r}
-#Variables sociales
+#Variables sociales, demográficas, etc
 social <- c("cntry","c2weight","gndr","eisced","netusoft","mnactic","hincfel")
-#Variables psicológicas
+#Variable psicológica
 psyco <- c("w4q50")
 
 #Creación del nuevo dataframe sobre el que desarrollar el estudio
@@ -33,7 +35,7 @@ estudio <- datos[, c(social, psyco)]
 ```
 
 
-#COMPROBACIÓN DE VALORES NA, Y EN CASO AFIRMATIVO, TRANSFORMARLOS
+#COMPROBACIÓN DE VALORES NA
 ```{r}
 # 1º - IDENTIFICAR COLUMNAS AFECTADAS
 if (any(is.na(estudio))) {
@@ -137,6 +139,7 @@ mosaic(relac,
 
 #TRANSFORMACIÓN DE VALORES `INÚTILES´(0, 77, 88, 99, etc) A NA
 CONVERSIÓN A NA de todos aquellos valores faltantes o inútiles (codificados en las variables de interés como 9, 55, 77, etc) en cuanto a respuestas susceptibles de análisis ("No aplica", Sin respuesta", "No sabe", etc).
+EL OBJETIVO ES EXCLUIR DICHAS CATEGORÍAS DE LA FUTURA VISUALIZACIÓN (ya que no aportan valor informativo), Y AL SER CONVERTIDOS A VALOR NA, SU MANEJO SERÁ MÁS FÁCIL
 ```{r}
 estudio$gndr[estudio$gndr == 9] <- NA 
 estudio$netusoft[estudio$netusoft %in% c(7, 8, 9)] <- NA
@@ -149,6 +152,7 @@ estudio$eisced[estudio$eisced %in% c(0, 55, 77, 88, 99)] <- NA
 #EXPORTAR BASE DE DATOS DEPURADA
 Para trabajar de forma definitiva en las futuras visualizaciones, se exportará un nuevo dataset en representación de los datos depurados
 ```{r}
-
+salida_csv <- here("Datos", "Base_Datos_depurada.csv")
+write_csv(estudio, file = salida_csv, na = "NA")
 ```
 
