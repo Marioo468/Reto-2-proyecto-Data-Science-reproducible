@@ -1,5 +1,5 @@
 # RETO 2 - ELABORACIÓN DE UN PROYECTO DE CIENCIA DE DATOS REPRODUCIBLE
-En el presente reto se mostrará la ejecución del trabajo de visualización planificado en el Reto 1.
+El presente reto mostrará la ejecución del trabajo de visualización planificado en el Reto 1.
 
 ## CONTEXTUALIZACIÓN
 Siguiendo el trabajo planteado en el Reto 1, se pretende estudiar gráficamente la felicidad de la población europea encuestada en el año 2024.
