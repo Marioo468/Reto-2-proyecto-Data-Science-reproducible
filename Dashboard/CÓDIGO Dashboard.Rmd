@@ -1,0 +1,37 @@
+---
+title: "CÓDIGO Dashboard"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(here) 
+```
+
+Refrescamos de nuevo los objetivos para el Reto 2, siguiendo los planes de visualización alcanzados en el Reto 1:
+
+OBJETIVO PRINCIPAL:
+-Mostrar la distribución geográfica europea de los niveles de felicidad.
+  -*GRAFICO/S*: **Mapa coroplético de Europa** y **Diagrama de barras apiladas horizontales**
+
+OBJETIVOS ESPECÍFICOS:
+-Comparar niveles de felicidad entre hombres y mujeres
+  -*GRAFICO/S*: **Waffle chart**
+-Ver qué actividades reflejan más felicidad
+  -*GRAFICO/S*: **Gráfico Lollipop**
+-Ver cómo se relacionan el uso de internet, la percepción de ingresos, o nivel de estudios, con la felicidad
+  -*GRAFICO/S*: **Gráficos de dispersión**
+
+Por tanto, el dashboard seguirá dicha estructura jerárquica
+
+```{r}
+
+
+
+```
+
+
+
+
+
+
