@@ -13,7 +13,8 @@ library(here)
 
 #CARGA DEL DATASET Y VISUALIZACIÓN INICIAL
 ```{r}
-datos <- read.csv('CRON2W4e01.csv', header=TRUE)
+library(readr)
+datos <- read_csv(here("Datos", "CRON2W4e01.csv"), show_col_types = FALSE)
 View(datos)
 nrow(datos)
 #vemos que el archivo contiene un total de 6032 sujetos/observaciones
@@ -154,5 +155,6 @@ Para trabajar de forma definitiva en las futuras visualizaciones, se exportará 
 ```{r}
 salida_csv <- here("Datos", "Base_Datos_depurada.csv")
 write_csv(estudio, file = salida_csv, na = "NA")
+cat("Archivo exportado en:", salida_csv, "\n")
 ```
 
