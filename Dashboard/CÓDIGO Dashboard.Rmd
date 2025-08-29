@@ -6,7 +6,6 @@ output:
     vertical_layout: fill
     theme: cosmo
 runtime: shiny
-
 ---
 
 ```{r setup, include=FALSE}
@@ -180,60 +179,7 @@ plotly::ggplotly(p_barras)
 
 ```
 
-#WAFFLE CHART Valores 3-4 CON HOVER
-```{r}
-library(dplyr)
-library(ggplot2)
-
-# 1) Agregamos ponderando y filtrando NAs
-waffle_df <- estudio %>%
-  filter(!is.na(gndr), !is.na(w4q50), !is.na(c2weight)) %>%
-  mutate(feliz_alta = as.numeric(w4q50 >= 3)) %>%        # 3 y 4 = “A menudo" y "Siempre”
-  group_by(gndr) %>%
-  summarise(
-    total_w = sum(c2weight, na.rm = TRUE),
-    alta_w  = sum(c2weight * feliz_alta, na.rm = TRUE),
-    prop_alta = alta_w / total_w,
-    .groups = "drop"
-  ) %>%
-  mutate(pct = round(prop_alta * 100))
-
-# 2) Construimos el waffle 10x10 por categoría (Hombre/Mujer) sin tocar el df original
-build_waffle <- function(pct, label){
-  tibble(
-    idx = 1:100,
-    fill = idx <= pct,
-    gndr = label
-  )
-}
-
-waffle_cells <- purrr::map2_dfr(waffle_df$pct, waffle_df$gndr, build_waffle) %>%
-  group_by(gndr) %>%
-  mutate(row = ((idx - 1) %/% 10) + 1,
-         col = ((idx - 1) %% 10) + 1) %>%
-  ungroup()
-
-# 3) Graficamos etiquetando en el plot (sin mutar el dataset base)
-ggplot(
-  waffle_cells,
-  aes(x = col, y = row, fill = fill)
-) +
-  geom_tile(color = "white", linewidth = 0.6) +
-  scale_y_reverse() +
-  scale_x_continuous(expand = c(0,0)) +
-  scale_fill_manual(values = c(`TRUE` = "#66AAFF", `FALSE` = "#B3D4FF"), guide = "none") +
-  coord_equal() +
-  facet_wrap(~ factor(gndr, levels = c(1,2), labels = c("Hombres","Mujeres")), nrow = 1) +
-  labs(
-    title = "Comparativa felicidad alta (ponderado) por género",
-    subtitle = "≥ “A menudo” (niveles 3–4)",
-    x = NULL, y = NULL
-  ) +
-  theme_minimal(base_size = 12) +
-  theme(strip.text = element_text(face = "bold"))
-```
-
-#WAFFLE CHART Valores completos
+#WAFFLE CHART 
 ```{r}
 library(dplyr)
 library(tidyr)
@@ -364,6 +310,66 @@ p <- ggplot(
   )
 
 ggplotly(p, tooltip = "text")
+
+```
+
+# GRAFICO LOLLIPOP (media ponderada de felicidad por actividad principal)
+```{r}
+library(dplyr)
+library(ggplot2)
+library(forcats)
+library(plotly)
+
+# Diccionario código -> etiqueta
+mnactic_lu <- tibble::tibble(
+  mnactic = 1:9,
+  actividad = c(
+    "Trabajo remunerado","Educación","Desempleo (buscando)","Desempleo (no busca)",
+    "Enfermo/discapacidad","Jubilado","Serv. comunitario/militar",
+    "Tareas del hogar/cuidado","Otro"
+  )
+)
+
+# Agregado + pegado de etiquetas + orden descendente (categoría con + felicidad arriba)
+lolli_df <- estudio %>%
+  filter(!is.na(mnactic), !is.na(w4q50), !is.na(c2weight)) %>%
+  group_by(mnactic) %>%
+  summarise(
+    media_felicidad = sum(w4q50 * c2weight, na.rm = TRUE) / sum(c2weight, na.rm = TRUE),
+    n_w = sum(c2weight, na.rm = TRUE),
+    .groups = "drop"
+  ) %>%
+  left_join(mnactic_lu, by = "mnactic") %>%
+  mutate(actividad = forcats::fct_reorder(actividad, media_felicidad, .desc = TRUE))
+
+p_lolli <- ggplot(
+  lolli_df,
+  aes(
+    x = media_felicidad,
+    y = actividad,
+    text = paste0(
+      "Actividad: ", actividad, "<br>",
+      "Felicidad media (w): ", round(media_felicidad, 2), "<br>",
+      "N ponderado: ", scales::comma(round(n_w, 0))
+    )
+  )
+) +
+  geom_segment(aes(x = 0, xend = media_felicidad, yend = actividad),
+               color = "#B3D4FF", linewidth = 4, lineend = "round") +
+  geom_point(color = "#1F78FF", size = 4) +
+  scale_y_discrete(limits = rev(levels(lolli_df$actividad))) +
+  labs(x = "Felicidad media (ponderada)", y = NULL,
+       title = "Ranking felicidad media por actividad principal") +
+  theme_minimal(base_size = 12) +
+  theme(plot.title = element_text(face = "bold", color = "#1F78FF"))
+
+plotly::ggplotly(p_lolli, tooltip = "text")
+
+```
+
+
+#GRÁFICOS DE DISPERSIÓN
+```{r}
 
 ```
 
