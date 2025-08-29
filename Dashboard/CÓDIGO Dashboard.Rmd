@@ -81,7 +81,7 @@ leaflet(shp) %>%
   addPolygons(
     fillColor = ~pal_map(felicidad_media), color = "#666666", weight = 0.8, opacity = 1,
     fillOpacity = 0.85,
-    label = ~paste0(name_long, "<br>Felicidad media (w): ", round(felicidad_media, 2)),
+    label = ~paste0(name_long, " Felicidad media (w): ", round(felicidad_media, 2)),
     labelOptions = labelOptions(direction = "auto"),
     highlightOptions = highlightOptions(weight = 2, color = "#3182bd",
                                         fillOpacity = 0.9, bringToFront = TRUE)
@@ -119,9 +119,10 @@ dicc_paises <- c(
 )
 #OJO1: el vector de dicc_paises está indexado x códigos (no x nombres)
 estudio <- estudio %>%
-  mutate(cntry = dplyr::coalesce(dicc_paises[cntry], cntry))
+  mutate(cntry_name = dplyr::coalesce(dicc_paises[cntry], cntry))  # crea columna nombres del diccionario
 #OJO2: USAR 'fallback' (red de seguridad) para garantizar las coincidencias abreviatura-nombre de los países en todos los Run, (no sólo en el 1º). Por tanto, hecho así, si no encuentra coincidencia en el diccionario, en lugar de devolver NA (VER #OJO3), usa un valor de respaldo (el 'fallback'), que en este caso es el propio valor original de cntry
 #OJO3: NO USAR estudio %>% mutate(cntry = dicc_paises[cntry]): En 1er Run, cntry tiene códigos ISO2 → se sustituyen por nombres y todo va bien. En ejecuciones posteriores: cntry ya son nombres, y dicc_paises[cntry] devuelve NA (porque el vector está indexado por códigos, no por nombres)
+
 
 # --- 1) Paleta azul coherente con el mapa (4 niveles) ---
 pal_likert <- colorRampPalette(c("#E8F1FF", "#B3D4FF", "#66AAFF", "#1F78FF"))(4)
@@ -129,27 +130,27 @@ pal_likert <- colorRampPalette(c("#E8F1FF", "#B3D4FF", "#66AAFF", "#1F78FF"))(4)
 
 # --- 2) Ordenar países por felicidad media ponderada
 orden_df <- estudio %>%
-  filter(!is.na(cntry), !is.na(w4q50), !is.na(c2weight)) %>%
-  group_by(cntry) %>%
+  filter(!is.na(cntry_name), !is.na(w4q50), !is.na(c2weight)) %>%
+  group_by(cntry_name) %>%
   summarise(felicidad_media = sum(w4q50 * c2weight, na.rm = TRUE) / sum(c2weight, na.rm = TRUE),
             .groups = "drop")
 
 bars_df <- estudio %>%
-  filter(!is.na(cntry), !is.na(w4q50), !is.na(c2weight)) %>%
-  count(cntry, w4q50, wt = c2weight, name = "w") %>%
-  group_by(cntry) %>%
+  filter(!is.na(cntry_name), !is.na(w4q50), !is.na(c2weight)) %>%
+  count(cntry_name, w4q50, wt = c2weight, name = "w") %>%
+  group_by(cntry_name) %>%
   mutate(prop = w / sum(w, na.rm = TRUE)) %>%
   ungroup() %>%
   # unir felicidad media para ordenar
-  left_join(orden_df, by = "cntry") %>%
+  left_join(orden_df, by = "cntry_name") %>%
   # ordenar países de menor a mayor felicidad media
-  mutate(cntry = forcats::fct_reorder(cntry, felicidad_media, .fun = mean, .na_rm = TRUE))
+  mutate(cntry_name = forcats::fct_reorder(cntry_name, felicidad_media, .fun = mean, .na_rm = TRUE))
 
 # --- 3) Gráfico de barras apiladas horizontales coherente con el mapa ---
 p_barras <- ggplot(
   bars_df,
   aes(
-    y = cntry,
+    y = cntry_name,
     x = prop,
     fill = factor(w4q50, levels = 1:4, labels = w4_labels)
   )
@@ -367,9 +368,109 @@ plotly::ggplotly(p_lolli, tooltip = "text")
 
 ```
 
-
 #GRÁFICOS DE DISPERSIÓN
 ```{r}
+#USO DE INTERNET
+estudio2 <- estudio %>%
+  filter(!is.na(netusoft), !is.na(w4q50), !is.na(cntry_name))
+#cntry_name para nombre de países (no su código: RECORDAR código DIAGRAMA DE BARRAS)
 
+internet <- ggplot(estudio2, aes(x = netusoft, y = w4q50, weight = c2weight)) +
+  geom_jitter(width = 0.15, height = 0.10, alpha = 0.25) +
+  geom_smooth(method = "lm", formula = y ~ x, aes(weight = c2weight), se = FALSE, color = "blue") +
+  facet_wrap(~cntry_name) +
+  scale_x_continuous(breaks = 1:5) +
+  scale_y_continuous(breaks = 1:4, labels = c("Rara vez","Algunas veces","A menudo","La mayor parte/siempre")) +
+  labs(x = "Uso de internet",
+       y = "Felicidad",
+       title = "Tendencia ponderada por país") +
+  theme_minimal()
+
+plotly::ggplotly(internet)
+
+```
+
+
+
+```{r}
+#SENTIMIENTOS SOBRE INGRESOS
+estudio2 <- estudio %>%
+  filter(!is.na(hincfel), !is.na(w4q50), !is.na(cntry_name)) %>%
+  mutate(hincfel_inv = 5 - hincfel) #invertimos ítems de la variable
+#CLAVE: INVERTIR LA ESCALA DE CODIFICACIÓN DE hincfel
+#Que los 3 gráficos transmitan de forma visual el mismo mensaje ("posible tendencia ascendente")
+#Justificación: dar coherencia visual al público (atendiendo a los otros 2 gráficos) y reducir ruido cognitivo
+
+ingreso <- ggplot(estudio2, aes(x = hincfel_inv, y = w4q50, weight = c2weight)) +
+  geom_jitter(width = 0.15, height = 0.10, alpha = 0.25) +
+  geom_smooth(method = "lm", formula = y ~ x, aes(weight = c2weight), se = FALSE, color = "blue") +
+  facet_wrap(~cntry_name) +
+  scale_x_continuous(breaks = 1:4) +
+  scale_y_continuous(breaks = 1:4, labels = c("Rara vez","Algunas veces","A menudo","La mayor parte/siempre")) +
+  labs(x = "Percepción ingresos",
+       y = "Felicidad",
+       title = "Tendencia ponderada por país") +
+  theme_minimal()
+
+plotly::ggplotly(ingreso)
+```
+
+```{r}
+#NIVEL EDUCACION
+estudio2 <- estudio %>%
+  filter(!is.na(eisced), !is.na(w4q50), !is.na(cntry_name))
+
+educat <- ggplot(estudio2, aes(x = eisced, y = w4q50, weight = c2weight)) +
+  geom_jitter(width = 0.15, height = 0.10, alpha = 0.25) +
+  geom_smooth(method = "lm", formula = y ~ x, aes(weight = c2weight), se = FALSE, color = "blue") +
+  facet_wrap(~cntry_name) +
+  scale_x_continuous(breaks = 1:7) +
+  scale_y_continuous(breaks = 1:4, labels = c("Rara vez","Algunas veces","A menudo","La mayor parte/siempre")) +
+  labs(x = "Uso de internet",
+       y = "Felicidad",
+       title = "Tendencia ponderada por país") +
+  theme_minimal()
+
+plotly::ggplotly(educat)
+```
+
+
+```{r}
+selectInput(
+  "x_rel", "Relación (eje X) para dispersión:",
+  choices = c("Uso de internet" = "netusoft",
+              "Percepción de ingresos" = "hincfel",
+              "Nivel educativo" = "eisced"),
+  selected = "netusoft"
+)
+
+output$scatter_sel <- renderPlotly({
+  xvar <- req(input$x_rel)  # "netusoft" | "hincfel" | "eisced"
+
+  # Elegimos la variable factor/ordinal adecuada para etiquetas
+  x_label <- case_when(
+    xvar == "netusoft" ~ "Uso de internet",
+    xvar == "hincfel"  ~ "Percepción de ingresos",
+    xvar == "eisced"   ~ "Nivel educativo",
+    TRUE ~ xvar
+  )
+
+  d <- estudio %>%
+    filter(!is.na(.data[[xvar]]), !is.na(w4q50), !is.na(c2weight)) %>%
+    mutate(x = as.numeric(.data[[xvar]]),
+           y = as.numeric(w4q50))
+
+  p <- ggplot(d, aes(x = x, y = y, weight = c2weight)) +
+    geom_jitter(width = 0.15, height = 0.10, alpha = 0.25) +
+    geom_smooth(method = "lm", formula = y ~ x,
+                aes(weight = c2weight), se = FALSE, color = brand_dark) +
+    labs(x = x_label, y = "Felicidad",
+         title = paste0("Relación ponderada: ", x_label, " vs Felicidad")) +
+    theme_minimal(base_size = 12) +
+    theme(plot.title = element_text(color = brand_dark, face = "bold"))
+
+  ggplotly(p)
+})
+plotlyOutput("scatter_sel", height = "420px")
 ```
 
