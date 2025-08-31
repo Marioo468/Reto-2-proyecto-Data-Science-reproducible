@@ -1,0 +1,484 @@
+---
+title: "CÓDIGO Dashboard"
+output:
+  flexdashboard::flex_dashboard:
+    orientation: rows
+    vertical_layout: scroll
+    theme: cosmo
+runtime: shiny
+output_file: "dashboard.html"
+---
+
+Refrescamos de nuevo los objetivos para el Reto 2, siguiendo los planes de visualización alcanzados en el Reto 1:
+
+OBJETIVO PRINCIPAL:
+-Mostrar la distribución geográfica europea de los niveles de felicidad.
+  -*GRAFICO/S*: **Mapa coroplético de Europa** y **Diagrama de barras apiladas horizontales**
+
+OBJETIVOS ESPECÍFICOS:
+-Comparar niveles de felicidad entre hombres y mujeres
+  -*GRAFICO/S*: **Waffle chart**
+-Ver qué actividades reflejan más felicidad
+  -*GRAFICO/S*: **Gráfico Lollipop**
+-Ver cómo se relacionan el uso de internet, la percepción de ingresos, o nivel de estudios, con la felicidad
+  -*GRAFICO/S*: **Gráficos de dispersión**
+
+Por tanto, el dashboard seguirá dicha estructura jerárquica
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, message = FALSE, warning = FALSE)
+
+library(here)
+# 1) Fija explícitamente la raíz del proyecto para ESTE archivo
+#    Usa la ruta relativa REAL desde la raíz del repo hasta este Rmd
+suppressWarnings(here::i_am("Dashboard/CODIGO_Dashboard.Rmd"))
+
+# 2) Fuerza el directorio raíz del knit a la raíz del repo
+knitr::opts_knit$set(root.dir = here::here())
+
+# 3) (opcional pero útil) trazas de verificación
+message("root: ", here::here())
+message("csv : ", here::here("Datos","Base_Datos_depurada.csv"))
+
+# 4) Carga de librerías restantes
+library(tidyverse)
+library(flexdashboard)
+library(shiny)
+library(plotly)
+library(leaflet)
+library(sf)
+library(rnaturalearth)
+library(rnaturalearthdata)
+library(readr)
+
+# 5) Lectura del CSV DE LA CARPETA DEL PROYECTO (no del temporal)
+csv_path <- here::here("Datos", "Base_Datos_depurada.csv")
+stopifnot(file.exists(csv_path))
+estudio <- readr::read_csv(csv_path, show_col_types = FALSE)
+
+# Shapes (mapa)
+world <- rnaturalearth::ne_countries(scale = "medium", returnclass = "sf") %>% st_transform(4326)
+```
+
+# MAPA + BARRAS + WAFFLE Y LOLLIPOP
+
+Row {data-height=600}
+------------------------------------
+
+### MAPA COROPLÉTICO 
+```{r}
+# Filtrado de datos + exclusión NA + calcular valores
+map_df <- estudio %>%
+  filter(!is.na(cntry), !is.na(w4q50), !is.na(c2weight)) %>%
+  group_by(cntry) %>%
+  summarise(
+    felicidad_media = sum(w4q50 * c2weight, na.rm = TRUE) / sum(c2weight, na.rm = TRUE),
+    n_w = sum(c2weight, na.rm = TRUE),
+    .groups = "drop"
+  )
+
+# Unimos por ISO2 si 'cntry' es el código ISO2 (ESS suele usarlo)
+world2 <- world %>%
+  mutate(cntry = toupper(iso_a2)) %>%
+  select(cntry, name_long, geometry)
+
+shp <- inner_join(world2, map_df, by = "cntry")
+
+# paleta para el MAPA
+pal_cols <- colorRampPalette(c("#E8F1FF", "#B3D4FF", "#66AAFF", "#1F78FF"))(7)
+pal_map  <- colorNumeric(palette = pal_cols,
+                         domain  = shp$felicidad_media,
+                         na.color = "#cccccc")
+
+# paleta invertida y dominio NEGATIVO ¡¡solo para la LEYENDA en leaflet!!
+# (por defecto leaflet construye la escala de color de arriba (valor mínimo) a abajo (valor máximo)!!
+pal_leg  <- colorNumeric(palette = rev(pal_cols),        #invertimos orden de colores por defecto 
+                         domain  = -shp$felicidad_media, #usamos el dominio en NEGATIVO para invertir el orden
+                         na.color = "#cccccc")
+
+leaflet(shp) %>%  
+  addProviderTiles(providers$CartoDB.Positron) %>%
+  addPolygons(
+    fillColor = ~pal_map(felicidad_media), color = "#666666", weight = 0.8, opacity = 1,
+    fillOpacity = 0.85,
+    label = ~paste0(name_long, " Felicidad media (w): ", round(felicidad_media, 2)),
+    labelOptions = labelOptions(direction = "auto"),
+    highlightOptions = highlightOptions(weight = 2, color = "#3182bd",
+                                        fillOpacity = 0.9, bringToFront = TRUE)
+  ) %>%
+  addLegend(
+    pal = pal_leg,                          #utilizamos la paleta invertida para la LEYENDA
+    values = -shp$felicidad_media,          #invertimos el orden (dominio NEGATIVO)
+    title = "Felicidad media",
+    opacity = 0.9,
+    labFormat = labelFormat(digits = 2,
+                            transform = function(x) -x) # eliminamos el valor negativo de los resultados de la leyenda
+  )
+
+```
+
+Row {data-height=400}
+-------------------------------------
+
+### DIAGRAMA DE BARRAS {data-width=50}
+```{r}
+# (Previo1) Etiquetas Likert felicidad
+w4_labels <- c("Rara vez o nunca","Algunas veces","A menudo","La mayor parte/siempre")
+
+# (Previo2) Mostrar nombres de países, en lugar de su abreviatura/código ISO2
+#(así, si el trabajo se amplía en el futuro con otros países, se puede reutilizar)
+dicc_paises <- c(
+  "AT" = "Austria",
+  "BE" = "Bélgica",
+  "CZ" = "República Checa",
+  "FI" = "Finlandia",
+  "FR" = "Francia",
+  "GB" = "Reino Unido",
+  "IS" = "Islandia",
+  "IT" = "Italia",
+  "PT" = "Portugal",
+  "SE" = "Suecia",
+  "SI" = "Eslovenia"
+)
+#OJO1: el vector de dicc_paises está indexado x códigos (no x nombres)
+estudio <- estudio %>%
+  mutate(cntry_name = dplyr::coalesce(dicc_paises[cntry], cntry))  # crea columna nombres del diccionario
+#OJO2: USAR 'fallback' (red de seguridad) para garantizar las coincidencias abreviatura-nombre de los países en todos los Run, (no sólo en el 1º). Por tanto, hecho así, si no encuentra coincidencia en el diccionario, en lugar de devolver NA (VER #OJO3), usa un valor de respaldo (el 'fallback'), que en este caso es el propio valor original de cntry
+#OJO3: NO USAR estudio %>% mutate(cntry = dicc_paises[cntry]): En 1er Run, cntry tiene códigos ISO2 → se sustituyen por nombres y todo va bien. En ejecuciones posteriores: cntry ya son nombres, y dicc_paises[cntry] devuelve NA (porque el vector está indexado por códigos, no por nombres)
+
+
+# --- 1) Paleta azul coherente con el mapa (4 niveles) ---
+pal_likert <- colorRampPalette(c("#E8F1FF", "#B3D4FF", "#66AAFF", "#1F78FF"))(4)
+# Resultado: 1 = muy claro … 4 = azul intenso
+
+# --- 2) Ordenar países por felicidad media ponderada
+orden_df <- estudio %>%
+  filter(!is.na(cntry_name), !is.na(w4q50), !is.na(c2weight)) %>%
+  group_by(cntry_name) %>%
+  summarise(felicidad_media = sum(w4q50 * c2weight, na.rm = TRUE) / sum(c2weight, na.rm = TRUE),
+            .groups = "drop")
+
+bars_df <- estudio %>%
+  filter(!is.na(cntry_name), !is.na(w4q50), !is.na(c2weight)) %>%
+  count(cntry_name, w4q50, wt = c2weight, name = "w") %>%
+  group_by(cntry_name) %>%
+  mutate(prop = w / sum(w, na.rm = TRUE)) %>%
+  ungroup() %>%
+  # unir felicidad media para ordenar
+  left_join(orden_df, by = "cntry_name") %>%
+  # ordenar países de menor a mayor felicidad media
+  mutate(cntry_name = forcats::fct_reorder(cntry_name, felicidad_media, .fun = mean, .na_rm = TRUE))
+
+# --- 3) Gráfico de barras apiladas horizontales coherente con el mapa ---
+p_barras <- ggplot(
+  bars_df,
+  aes(
+    y = cntry_name,
+    x = prop,
+    fill = factor(w4q50, levels = 1:4, labels = w4_labels)
+  )
+) +
+  geom_col(width = 0.8) +
+  scale_x_continuous(labels = scales::percent) +
+  # Paleta azul con orden claro→intenso (menos→más felicidad)
+  scale_fill_manual(
+    values = pal_likert,
+    breaks = w4_labels,      # asegura el orden en la leyenda
+    labels = w4_labels,
+    guide  = guide_legend(reverse = TRUE)  # leyenda de más→menos (intenso arriba), opcional
+  ) +
+  labs(
+    x = "Proporción",
+    y = NULL,
+    fill = "Felicidad",
+    title = "Distribución por país de niveles de felicidad"
+  ) +
+  theme_minimal(base_size = 11) +
+  theme(
+    legend.position = "right",
+    panel.grid.major.y = element_blank()
+  )
+
+plotly::ggplotly(p_barras)
+
+```
+
+Row {data-height=450}
+-------------------------------------
+
+### WAFFLE CHART {data-width=50}
+```{r}
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+library(plotly)
+library(purrr)
+
+# ------------------ Configuración ------------------
+w4_palette <- c("#E8F1FF", "#B3D4FF", "#66AAFF", "#1F78FF")
+w4_labels  <- c("Rara vez o nunca","Algunas veces","A menudo","La mayor parte/siempre")
+
+# Detectamos nombres de columnas (cámbialos aquí si quieres forzar uno)
+gender_col <- intersect(c("gndr","gender","sexo","sex"), names(estudio))[1]
+w_col      <- intersect(c("w4q50","felicidad","happy"),      names(estudio))[1]
+wt_col     <- intersect(c("c2weight","weight","peso"),       names(estudio))[1]
+
+if (length(gender_col) == 0) stop("No se encontró la columna de género (gndr/gender/sexo/sex).")
+if (length(w_col) == 0)      stop("No se encontró la columna de felicidad (w4q50/felicidad/happy).")
+if (length(wt_col) == 0)     stop("No se encontró la columna de peso (c2weight/weight/peso).")
+
+# ------------------ 1) Agregación ponderada ------------------
+agg <- estudio %>%
+  filter(!is.na(.data[[gender_col]]),
+         !is.na(.data[[w_col]]),
+         !is.na(.data[[wt_col]])) %>%
+  mutate(
+    gndr  = as.integer(.data[[gender_col]]),      # 1=hombres, 2=mujeres
+    w4q50 = as.integer(.data[[w_col]]),           # niveles 1..4
+    w     = as.numeric(.data[[wt_col]])
+  ) %>%
+  group_by(gndr, w4q50) %>%
+  summarise(
+    w_sum = sum(w, na.rm = TRUE),   # N ponderado en el nivel
+    n_sum = n(),                    # n sin ponderar en el nivel
+    .groups = "drop"
+  ) %>%
+  group_by(gndr) %>%
+  mutate(
+    total_w   = sum(w_sum),
+    total_n   = sum(n_sum),
+    prop      = w_sum / total_w,
+    pct_exact = 100 * prop          # % con decimales
+  ) %>%
+  ungroup()
+
+# ------------------ 2) Redondeo a 100 celdas por género ------------------
+agg_int <- agg %>%
+  arrange(gndr, w4q50) %>%
+  group_by(gndr) %>%
+  group_modify(~{
+    p <- .x$pct_exact
+    base <- floor(p)
+    remainder <- 100 - sum(base)
+    add <- rep(0, length(p))
+    if (remainder > 0) {
+      add[order(p - base, decreasing = TRUE)[seq_len(remainder)]] <- 1
+    }
+    .x$pct_int <- base + add
+    .x
+  }) %>%
+  ungroup()
+
+# ------------------ 3) Expandimos a 100 celdas y coordenadas 10x10 --------
+waffle_cells <- agg_int %>%
+  group_by(gndr) %>%
+  arrange(w4q50, .by_group = TRUE) %>%
+  group_modify(~{
+    # Repetimos el nivel w4q50 tantas veces como celdas le correspondan
+    levels_vec <- rep(.x$w4q50, .x$pct_int)      # longitud 100 garantizada
+    tibble(
+      gndr  = .x$gndr[1],
+      idx   = seq_along(levels_vec),
+      w4q50 = levels_vec
+    )
+  }) %>%
+  ungroup() %>%
+  group_by(gndr) %>%
+  mutate(
+    row = ((idx - 1) %/% 10) + 1,
+    col = ((idx - 1) %% 10) + 1
+  ) %>%
+  ungroup()
+
+# ------------------ 4) Unimos métricas para el tooltip ---------------------
+waffle_cells <- waffle_cells %>%
+  left_join(
+    agg_int %>% select(gndr, w4q50, pct_exact, w_sum, n_sum, total_w, total_n),
+    by = c("gndr","w4q50")
+  ) %>%
+  mutate(
+    gndr_lbl = factor(gndr, levels = c(1,2), labels = c("Hombres","Mujeres")),
+    w4_lbl   = factor(w4q50, levels = 1:4, labels = w4_labels),
+    fill_key = w4_lbl,
+    text = paste0(
+      "<b>", gndr_lbl, "</b><br>",
+      "Nivel: ", w4_lbl, "<br>",
+      sprintf("%% ponderado: %.1f%%", pct_exact), "<br>",
+      "N ponderado nivel/total: ", sprintf("%.0f", w_sum), " / ", sprintf("%.0f", total_w), "<br>",
+      "n sin ponderar nivel/total: ", n_sum, " / ", total_n
+    )
+  )
+
+# ------------------ 5) Gráfico + hover -------------------------------------
+p <- ggplot(
+  waffle_cells,
+  aes(x = col, y = row, fill = fill_key, text = text)
+) +
+  geom_tile(color = "white", linewidth = 0.6) +
+  scale_y_reverse() +
+  scale_x_continuous(expand = c(0,0)) +
+  coord_equal() +
+  facet_wrap(~ gndr_lbl, nrow = 1) +
+  scale_fill_manual(
+    name   = "Felicidad",
+    values = setNames(w4_palette, w4_labels),
+    breaks = w4_labels,
+    labels = w4_labels
+  ) +
+  labs(
+    title    = "Distribución global de niveles de felicidad (ponderado)",
+    subtitle = "Waffle 10×10 por género — w4q50 (1=menos, 4=más)",
+    x = NULL, y = NULL
+  ) +
+  theme_minimal(base_size = 12) +
+  theme(
+    strip.text = element_text(face = "bold"),
+    panel.grid = element_blank()
+  )
+
+ggplotly(p, tooltip = "text")
+
+```
+
+### GRAFICO LOLLIPOP {data-width=50}
+```{r}
+library(dplyr)
+library(ggplot2)
+library(forcats)
+library(plotly)
+
+# Diccionario código -> etiqueta
+mnactic_lu <- tibble::tibble(
+  mnactic = 1:9,
+  actividad = c(
+    "Trabajo remunerado","Educación","Desempleo (buscando)","Desempleo (no busca)",
+    "Enfermo/discapacidad","Jubilado","Serv. comunitario/militar",
+    "Tareas del hogar/cuidado","Otro"
+  )
+)
+
+# Agregado + pegado de etiquetas + orden descendente (categoría con + felicidad arriba)
+lolli_df <- estudio %>%
+  filter(!is.na(mnactic), !is.na(w4q50), !is.na(c2weight)) %>%
+  group_by(mnactic) %>%
+  summarise(
+    media_felicidad = sum(w4q50 * c2weight, na.rm = TRUE) / sum(c2weight, na.rm = TRUE),
+    n_w = sum(c2weight, na.rm = TRUE),
+    .groups = "drop"
+  ) %>%
+  left_join(mnactic_lu, by = "mnactic") %>%
+  mutate(actividad = forcats::fct_reorder(actividad, media_felicidad, .desc = TRUE))
+
+p_lolli <- ggplot(
+  lolli_df,
+  aes(
+    x = media_felicidad,
+    y = actividad,
+    text = paste0(
+      "Actividad: ", actividad, "<br>",
+      "Felicidad media (w): ", round(media_felicidad, 2), "<br>",
+      "N ponderado: ", scales::comma(round(n_w, 0))
+    )
+  )
+) +
+  geom_segment(aes(x = 0, xend = media_felicidad, yend = actividad),
+               color = "#B3D4FF", linewidth = 4, lineend = "round") +
+  geom_point(color = "#1F78FF", size = 4) +
+  scale_y_discrete(limits = rev(levels(lolli_df$actividad))) +
+  labs(x = "Felicidad media (ponderada)", y = NULL,
+       title = "Ranking global de felicidad media por actividad") +
+  theme_minimal(base_size = 12) +
+  theme(plot.title = element_text(face = "bold", color = "#1F78FF"))
+
+plotly::ggplotly(p_lolli, tooltip = "text")
+
+```
+
+
+# GRÁFICOS DISPERSIÓN
+
+Row {data-height=600}
+-------------------------------------
+
+### USO DE INTERNET [Codificado: de menor (izqda) a mayor (dcha) nivel]
+```{r}
+#USO DE INTERNET
+estudio1 <- estudio %>%
+  filter(!is.na(netusoft), !is.na(w4q50), !is.na(cntry_name))
+#cntry_name para nombre de países (no su código: RECORDAR código DIAGRAMA DE BARRAS)
+
+# Matriz de dispersión (con línea de tendencia) por países
+internet <- ggplot(estudio1, aes(x = netusoft, y = w4q50, weight = c2weight)) +
+  geom_jitter(width = 0.15, height = 0.10, alpha = 0.25) +
+  geom_smooth(method = "lm", formula = y ~ x, aes(weight = c2weight), se = FALSE, color = "blue") +
+  facet_wrap(~cntry_name) +
+  scale_x_continuous(breaks = 1:5) +
+  scale_y_continuous(breaks = 1:4, labels = c("Rara vez","Algunas veces","A menudo","La mayor parte/siempre")) +
+  labs(x = "Uso de internet",
+       y = "Felicidad",
+       title = "Tendencia ponderada por país") +
+  theme_minimal()
+
+plotly::ggplotly(internet)
+```
+
+### NIVEL EDUCATIVO [Codificado: de menor (izqda) a mayor (dcha) nivel]
+```{r}
+#NIVEL EDUCACION
+estudio2 <- estudio %>%
+  filter(!is.na(eisced), !is.na(w4q50), !is.na(cntry_name))
+
+educat <- ggplot(estudio2, aes(x = eisced, y = w4q50, weight = c2weight)) +
+  geom_jitter(width = 0.15, height = 0.10, alpha = 0.25) +
+  geom_smooth(method = "lm", formula = y ~ x, aes(weight = c2weight), se = FALSE, color = "blue") +
+  facet_wrap(~cntry_name) +
+  scale_x_continuous(breaks = 1:7) +
+  scale_y_continuous(breaks = 1:4, labels = c("Rara vez","Algunas veces","A menudo","La mayor parte/siempre")) +
+  labs(x = "Nivel de educación",
+       y = "Felicidad",
+       title = "Tendencia ponderada por país") +
+  theme_minimal()
+
+plotly::ggplotly(educat)
+```
+
+### PERCEPCIÓN INGRESOS [Codificado: de menor (izqda) a mayor (dcha) nivel]
+```{r}
+#SENTIMIENTOS SOBRE INGRESOS
+estudio3 <- estudio %>%
+  filter(!is.na(hincfel), !is.na(w4q50), !is.na(cntry_name)) %>%
+  mutate(hincfel_inv = 5 - hincfel) #invertimos ítems de la variable
+#CLAVE: INVERTIR LA ESCALA DE CODIFICACIÓN DE hincfel
+#Que los 3 gráficos transmitan de forma visual el mismo mensaje ("posible tendencia ascendente")
+#Justificación: dar coherencia visual al público (atendiendo a los otros 2 gráficos) y reducir ruido cognitivo
+
+ingreso <- ggplot(estudio3, aes(x = hincfel_inv, y = w4q50, weight = c2weight)) +
+  geom_jitter(width = 0.15, height = 0.10, alpha = 0.25) +
+  geom_smooth(method = "lm", formula = y ~ x, aes(weight = c2weight), se = FALSE, color = "blue") +
+  facet_wrap(~cntry_name) +
+  scale_x_continuous(breaks = 1:4) +
+  scale_y_continuous(breaks = 1:4, labels = c("Rara vez","Algunas veces","A menudo","La mayor parte/siempre")) +
+  labs(x = "Percepción ingresos",
+       y = "Felicidad",
+       title = "Tendencia ponderada por país") +
+  theme_minimal()
+
+plotly::ggplotly(ingreso)
+```
+
+
+#EJECUTAR Y GUARDAR EL DASHBOARD
+```{r}
+# Ante posible ausencia del botón Knit, DESCOMENTAR Y EJECUTAR ESTE CÓDIGO ¡¡EN CONSOLA!!:
+#rmarkdown::render(
+#  "Dashboard/CODIGO_Dashboard.Rmd",
+#  output_format = "flexdashboard::flex_dashboard",
+#  output_file   = "dashboard.html",
+#  output_dir    = "Dashboard",
+#  clean = TRUE,
+#  envir = new.env()
+#)
+
+# Esto es debido a que el botón Run Document solo ejecuta el dashboard en un directorio temporal y no guarda el HTML en la carpeta de interés
+```
+
