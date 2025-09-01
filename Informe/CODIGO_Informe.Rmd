@@ -1,0 +1,228 @@
+---
+title: "\\textbf{INFORME TÉCNICO}"
+author: "Mario Vega"
+date: "2025-08-31"
+output: 
+  pdf_document:
+    toc: true
+    number_sections: false
+    fig_caption: true
+latex_engine: pdflatex
+fontsize: 12pt
+header-includes:
+  - \renewcommand{\contentsname}{Índice}
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo = FALSE, message = FALSE, warning = FALSE, 
+  fig.width = 7, fig.height = 4.2, fig.pos = 'H')
+
+# Cargar lo necesario
+# Suprime messages de attach/mascarado de paquetes
+suppressPackageStartupMessages({
+  library(tidyverse)
+  library(ggplot2)
+  library(kableExtra) # para estilos extra en tablas
+})
+
+accent <- "#1F78FF"
+```
+
+```{r}
+#PREPARACIÓN DATOS
+
+# Carga del dataset depurado g
+csv_path <- here::here("Datos", "Base_Datos_depurada.csv")
+estudio  <- readr::read_csv(csv_path, show_col_types = FALSE)
+
+# Diccionario países (fallback al código si falta alguno)
+dicc_paises <- c(
+  "AT"="Austria","BE"="Bélgica","CZ"="República Checa","FI"="Finlandia","FR"="Francia",
+  "GB"="Reino Unido","IS"="Islandia","IT"="Italia","PT"="Portugal","SE"="Suecia","SI"="Eslovenia"
+)
+
+estudio <- estudio %>%
+  mutate(
+    cntry_name = dplyr::coalesce(dicc_paises[cntry], cntry),
+    # Limpieza defensiva (por si el CSV llegara a tener valores no informativos)
+    gndr   = ifelse(gndr   %in% c(9), NA, gndr),
+    netusoft = ifelse(netusoft %in% c(7,8,9), NA, netusoft),
+    mnactic  = ifelse(mnactic  %in% c(66,77,88,99), NA, mnactic),
+    hincfel  = ifelse(hincfel  %in% c(7,8,9), NA, hincfel),
+    eisced   = ifelse(eisced   %in% c(0,55,77,88,99), NA, eisced)
+  )
+```
+
+```{r}
+# Media ponderada por país + total UE
+by_country <- estudio %>%
+  filter(!is.na(w4q50), !is.na(c2weight), !is.na(cntry_name)) %>%
+  group_by(cntry_name) %>%
+  summarise(
+    fel_mean_w = sum(w4q50 * c2weight, na.rm = TRUE) / sum(c2weight, na.rm = TRUE),
+    n_w = sum(c2weight, na.rm = TRUE),
+    .groups = "drop"
+  )
+
+eu_mean <- with(estudio %>% filter(!is.na(w4q50), !is.na(c2weight)),
+                sum(w4q50 * c2weight, na.rm=TRUE) / sum(c2weight, na.rm=TRUE))
+
+top_cty <- by_country %>% slice_max(fel_mean_w, n = 1) %>% select(cntry_name, fel_mean_w)
+bot_cty <- by_country %>% slice_min(fel_mean_w, n = 1) %>% select(cntry_name, fel_mean_w)
+
+# Brecha por género (H - M)
+gender_df <- estudio %>%
+  filter(!is.na(w4q50), !is.na(c2weight), gndr %in% c(1,2)) %>%
+  group_by(gndr) %>%
+  summarise(fel_mean_w = sum(w4q50 * c2weight, na.rm = TRUE) / sum(c2weight, na.rm = TRUE), .groups="drop") %>%
+  pivot_wider(names_from = gndr, values_from = fel_mean_w, names_prefix = "g")
+gender_gap <- (gender_df$g1 - gender_df$g2)[1]
+
+
+# Actividad con mayor felicidad media
+mn_lu <- tibble::tibble(
+  mnactic = 1:9,
+  actividad = c("Trabajo remunerado","Educación","Desempleo (buscando)","Desempleo (no busca)",
+                "Enfermo/discapacidad","Jubilado","Serv. comunitario/militar",
+                "Tareas del hogar/cuidado","Otro")
+)
+by_activity <- estudio %>%
+  filter(!is.na(mnactic), !is.na(w4q50), !is.na(c2weight)) %>%
+  group_by(mnactic) %>%
+  summarise(fel_mean_w = sum(w4q50 * c2weight, na.rm = TRUE) / sum(c2weight, na.rm = TRUE),
+            .groups = "drop") %>%
+  left_join(mn_lu, by="mnactic")
+top_act <- by_activity %>% slice_max(fel_mean_w, n = 1) %>% select(actividad, fel_mean_w)
+bot_act <- by_activity %>% slice_min(fel_mean_w, n = 1) %>% select(actividad, fel_mean_w)
+
+tabla_resumen <- tibble::tibble(
+  Indicador = c("Media de felicidad (UE, ponderada)",
+                "País con mayor felicidad",
+                "País con menor felicidad",
+                "Media felicidad Hombres",
+                "Media felicidad Mujeres",
+                "Brecha por género (H - M, puntos Likert)",
+                "Actividad con mayor felicidad",
+                "Actividad con menor felicidad"),
+  Valor = c(
+    sprintf("%.2f", eu_mean),
+    paste0(top_cty$cntry_name, " (", sprintf("%.2f", top_cty$fel_mean_w), ")"),
+    paste0(bot_cty$cntry_name, " (", sprintf("%.2f", bot_cty$fel_mean_w), ")"),
+    sprintf("%.2f", gender_df$g1),
+    sprintf("%.2f", gender_df$g2),
+    sprintf("%.2f", gender_gap),
+    paste0(top_act$actividad, " (", sprintf("%.2f", top_act$fel_mean_w), ")"),
+    paste0(bot_act$actividad, " (", sprintf("%.2f", bot_act$fel_mean_w), ")")
+  )
+)
+```
+
+# INTRODUCCIÓN
+
+El presente informe analiza brevemente algunos resultados de los niveles de felicidad obtenidos en diferentes países europeos, a través de un estudio de encuestas efectuado en 2024, y cuya visualización general se encuentra en el dashboard mostrado anteriormente (documento HTML, de la carpeta Dashboard).
+
+\vspace{1cm}  <!-- deja 1 cm de espacio vertical -->
+
+La variable de felicidad respondía al siguiente ítem: *“Durante la semana pasada, ¿con qué frecuencia te sentiste feliz?”*.
+
+Sus niveles de medición (formato Likert de respuesta) se enmarcan de la siguiente forma:
+
+1 = Rara vez o nunca
+
+2 = Algunas veces
+
+3 = A menudo
+
+4 = La mayor parte o todo el tiempo
+
+\vspace{1cm}  
+
+Además de dicha variable, se han tenido presentes otros datos de interés, como el género o el tipo de actividad (Jubilado, Tareas del hogar, Trabajo remunerado...).
+
+\vspace{1cm}  
+
+**Nota metodológica:** atendiendo a la peculiaridad del estudio (cantidad de encuestados diferente entre países, posible falta de respuesta en algunos encuestados...), todos los cálculos realizados se han efectuado de forma ponderada, atendiendo a una variable técnica de peso muestral (*c2weight*).
+
+Por tanto, todas las métricas son ponderadas por *c2weight*
+
+\vspace{1cm}  
+
+En este informe, nos centraremos en algunos indicadores extraídos de los principales gráficos del estudio (en este caso, del Mapa coroplético, del Diagrama de barras, del Waflle chart y del Gráfico Lollipop)
+
+\vspace{1cm}
+# GRÁFICO felicidad media (ponderada) por país
+```{r}
+plot_df <- by_country %>%
+  mutate(cntry_name = fct_reorder(cntry_name, fel_mean_w))
+
+ggplot(plot_df, aes(x = fel_mean_w, y = cntry_name)) +
+  geom_segment(aes(x = 1, xend = fel_mean_w, yend = cntry_name),
+               linewidth = 4, color = alpha(accent, 0.35), lineend = "round") +
+  geom_point(size = 2.8, color = accent) +
+  scale_x_continuous(limits = c(1, 4), breaks = 1:4) +
+  labs(x = "Felicidad media (ponderada, 1–4)", y = NULL) +
+  theme_minimal(base_size = 11) +
+  theme(
+    panel.grid.major.y = element_blank()
+  )
+```
+
+\vspace{1cm} 
+
+Este gráfico muestra, de forma jerárquica, los resultados de felicidad media hallados en el mapa del dashboard.
+
+En todos ellos, se puede observar una **media nacional entre una frecuencia de felicidad 2 ("Algunas veces") y 3 ("A menudo")**, si bien algunos países como **Eslovenia o Bélgica reflejan una aproximación mayor al nivel 3**, sugiriendo que la población encuestada de estos países tendió a una felicidad más frecuente que países como Italia o R. Checa.
+
+\vspace{1cm}
+# TABLA RESUMEN con algunos indicadores
+```{r}
+tabla_resumen %>%
+  kbl(
+    booktabs = TRUE, align = c("l","l"),
+    col.names = c("Indicador","Valor"),
+    caption = "TABLA: ALGUNOS INDICADORES DEL ESTUDIO"
+  ) %>%
+  kable_styling(latex_options = c("striped", "hold_position", "scale_down")) %>%
+  row_spec(0, bold = TRUE, color = "white", background = accent)
+```
+
+\vspace{1cm} 
+
+- Podemos observar que la **media europea de felicidad obtenida es `r sprintf('%.2f', eu_mean)`**, y por tanto, constituye un nivel de frecuencia de felicidad entre "Algunas veces" (nivel 2) y "A menudo" (nivel 3).
+
+- El **país con mayor frecuencia de felicidad obtenido fue `r paste0(top_cty$cntry_name, " (", sprintf("%.2f", top_cty$fel_mean_w), ")")`**, lo que le coloca muy próximo a estar feliz "A menudo". Por su parte, **`r bot_cty$cntry_name` obtuvo el nivel más bajo (`r sprintf("%.2f", bot_cty$fel_mean_w)`)**.
+
+- **La media de felicidad Hombres-Mujeres es, respectivamente, `r sprintf("%.2f", gender_df$g1)`-`r sprintf("%.2f", gender_df$g2)`**, enmarcándose ambas en un nivel de sentirse feliz "Algunas veces", con tendencia a aproximarse a una frecuencia de "A menudo". 
+Esto significa que la diferencia de felicidad entre hombres y mujeres es inexistente: 0.01 puntos de felicidad favorable a los hombres, equivalente a un 1% dentro de la escala de nivel 2 de felicidad ("Algunas veces").
+
+- **De las múltiples actividades analizadas** (visibles todas ellas en el dashboard: Gráfico Lollipop), **el mayor nivel medio de felicidad obtenido fue la categoría "`r top_act$actividad`" con un `r sprintf("%.2f", top_act$fel_mean_w)`**, lo que le sitúa cercano a una frecuencia "A menudo" de felicidad.
+
+- A su vez, **la actividad "`r bot_act$actividad`" reflejó el nivel menor de felicidad (`r sprintf("%.2f", bot_act$fel_mean_w)`)**, pero igualmente, dentro del rango "Algunas veces" de frecuencia de felicidad.
+
+
+\vspace{1cm}
+# ALGUNAS CONCLUSIONES
+
+Los presentes resultados constituyen una aproximación hacia el estudio de la felicidad en diferentes países europeos. La **frecuencia de felicidad** se ha medido desde una **escala Likert 1-4**, donde **1** implica una frecuencia de haberse sentido feliz "Rara vez o nunca", **2** de "Algunas veces", **3** de "A menudo", y **4** "La mayor parte/siempre".
+
+Por cuestiones técnicas, todos los cálculos se han efectuado de forma ponderada.
+
+\vspace{1cm}
+
+Algunas de los conclusiones obtenidas son:
+
+- La media europea de felicidad  es `r sprintf('%.2f', eu_mean)`.
+- No existe ninguna diferencia en los niveles de felicidad entre hombres y mujeres.
+- El país con más puntuación media de felicidad frecuente fue `r paste0(top_cty$cntry_name, " (", sprintf("%.2f", top_cty$fel_mean_w), ")")`, mientras `r bot_cty$cntry_name` fue el que menor media obtuvo con `r sprintf("%.2f", bot_cty$fel_mean_w)`.
+- Las personas jubiladas mostraban la media de felicidad más alta (`r sprintf("%.2f", top_act$fel_mean_w)`), y las personas enfermas o con discapacidad la puntuación más baja: `r sprintf("%.2f", bot_act$fel_mean_w)`.
+
+\vspace{1cm}
+
+**Reflexión:** La felicidad es una realidad muy compleja, cuyo estudio debe efectuarse de una forma multidisciplinar, y atendiendo a múltiples factores (muchos de ellos, fuera del alcance de este trabajo).
+Por ello, tanto las visualizaciones como los resultados obtenidos en el presente trabajo deben interpretarse desde una perspectiva discreta y limitada, y con el prisma de enrriquecer el estudio de la felicidad con más datos y metodologías en el futuro.
+
+
+
+
+
