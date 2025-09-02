@@ -397,10 +397,20 @@ plotly::ggplotly(p_lolli, tooltip = "text")
 
 # GRÁFICOS DISPERSIÓN
 
+Row {data-height=140}
+-------------------------------------
+
+### Codificación
+USO DE INTERNET: frecuencia medida desde **1** (Nunca) hasta **5** (Cada día)
+
+NIVEL EDUCATIVO: medido desde **1** (< Secundaria) hasta **7** (Postgrado)
+
+PERCEPCIÓN INGRESOS: valoración desde **1** (Difícil) hasta **4** (Vivir cómodamente)
+
 Row {data-height=600}
 -------------------------------------
 
-### USO DE INTERNET [Codificado: de menor (izqda) a mayor (dcha) nivel]
+### USO DE INTERNET 
 ```{r}
 #USO DE INTERNET
 estudio1 <- estudio %>%
@@ -422,7 +432,7 @@ internet <- ggplot(estudio1, aes(x = netusoft, y = w4q50, weight = c2weight)) +
 plotly::ggplotly(internet)
 ```
 
-### NIVEL EDUCATIVO [Codificado: de menor (izqda) a mayor (dcha) nivel]
+### NIVEL EDUCATIVO 
 ```{r}
 #NIVEL EDUCACION
 estudio2 <- estudio %>%
@@ -442,7 +452,7 @@ educat <- ggplot(estudio2, aes(x = eisced, y = w4q50, weight = c2weight)) +
 plotly::ggplotly(educat)
 ```
 
-### PERCEPCIÓN INGRESOS [Codificado: de menor (izqda) a mayor (dcha) nivel]
+### PERCEPCIÓN INGRESOS
 ```{r}
 #SENTIMIENTOS SOBRE INGRESOS
 estudio3 <- estudio %>%
