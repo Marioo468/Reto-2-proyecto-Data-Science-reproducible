@@ -1,0 +1,660 @@
+---
+title: "PRESENTACIÓN"
+
+output:
+  flexdashboard::flex_dashboard:
+    orientation: rows
+    vertical_layout: scroll
+    theme: cosmo
+runtime: shiny
+output_file: "Presentacion.html"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, message = FALSE, warning = FALSE)
+
+# Carga de librerías 
+library(tidyverse)
+library(flexdashboard)
+library(shiny)
+library(plotly)
+library(leaflet)
+library(sf)
+library(rnaturalearth)
+library(rnaturalearthdata)
+library(readr)
+library(ggplot2)
+library(kableExtra)
+
+# 5) Lectura del CSV 
+csv_path <- here::here("Datos", "Base_Datos_depurada.csv")
+stopifnot(file.exists(csv_path))
+estudio <- readr::read_csv(csv_path, show_col_types = FALSE)
+
+# Shapes (mapa)
+world <- rnaturalearth::ne_countries(scale = "medium", returnclass = "sf") %>% st_transform(4326)
+
+accent <- "#1F78FF"
+```
+
+# INTRODUCCIÓN
+
+### {.well}
+
+La siguiente presentación resumirá los principales hallazgos de un estudio sobre felicidad europea, efectuado mediante encuesta por el ESS (European Social Survey) en el año 2024.
+
+<br>
+
+La variable de felicidad respondía al siguiente ítem: *“Durante la semana pasada, ¿con qué frecuencia te sentiste feliz?”*.
+
+Sus niveles de medición (formato Likert de respuesta) se enmarcan de la siguiente forma:
+
+1 = Rara vez o nunca
+
+2 = Algunas veces
+
+3 = A menudo
+
+4 = La mayor parte o todo el tiempo
+
+<br>
+
+Además de dicha variable, se han tenido presentes otros datos de interés, como el género, el tipo de actividad (Jubilado, Tareas del hogar, Trabajo remunerado...), la frecuencia de uso de internet, el nivel educativo, o el sentimiento sobre los ingresos (cómo se siente el encuestado respecto de los actuales ingresos de su hogar).
+
+**Nota metodológica:** atendiendo a la peculiaridad del estudio (cantidad de encuestados diferente entre países, posible falta de respuesta en algunos encuestados...), todos los cálculos realizados se han efectuado de forma ponderada, atendiendo a una variable técnica de peso muestral (*c2weight*).
+Por tanto, todas las métricas son ponderadas por *c2weight*.
+
+<br>
+
+Los objetivos giran en torno a estudiar visualmente los niveles de frecuencia de felicidad hallados en los diferentes países, además de cómo se comporta la felicidad con el resto de variables mencionadas.
+
+
+# LA FELICIDAD EN EUROPA
+
+Row {data-height=450}
+-------------------------------------
+
+### Mapa europeo {data-width=50}
+```{r}
+# Filtrado de datos + exclusión NA + calcular valores
+map_df <- estudio %>%
+  filter(!is.na(cntry), !is.na(w4q50), !is.na(c2weight)) %>%
+  group_by(cntry) %>%
+  summarise(
+    felicidad_media = sum(w4q50 * c2weight, na.rm = TRUE) / sum(c2weight, na.rm = TRUE),
+    n_w = sum(c2weight, na.rm = TRUE),
+    .groups = "drop"
+  )
+
+# Unimos por ISO2 si 'cntry' es el código ISO2 (ESS suele usarlo)
+world2 <- world %>%
+  mutate(cntry = toupper(iso_a2)) %>%
+  select(cntry, name_long, geometry)
+
+shp <- inner_join(world2, map_df, by = "cntry")
+
+# paleta para el MAPA
+pal_cols <- colorRampPalette(c("#E8F1FF", "#B3D4FF", "#66AAFF", "#1F78FF"))(7)
+pal_map  <- colorNumeric(palette = pal_cols,
+                         domain  = shp$felicidad_media,
+                         na.color = "#cccccc")
+
+# paleta invertida y dominio NEGATIVO ¡¡solo para la LEYENDA en leaflet!!
+# (por defecto leaflet construye la escala de color de arriba (valor mínimo) a abajo (valor máximo)!!
+pal_leg  <- colorNumeric(palette = rev(pal_cols),        #invertimos orden de colores por defecto 
+                         domain  = -shp$felicidad_media, #usamos el dominio en NEGATIVO para invertir el orden
+                         na.color = "#cccccc")
+
+leaflet(shp) %>%  
+  addProviderTiles(providers$CartoDB.Positron) %>%
+  addPolygons(
+    fillColor = ~pal_map(felicidad_media), color = "#666666", weight = 0.8, opacity = 1,
+    fillOpacity = 0.85,
+    label = ~paste0(name_long, " Felicidad media (w): ", round(felicidad_media, 2)),
+    labelOptions = labelOptions(direction = "auto"),
+    highlightOptions = highlightOptions(weight = 2, color = "#3182bd",
+                                        fillOpacity = 0.9, bringToFront = TRUE)
+  ) %>%
+  addLegend(
+    pal = pal_leg,                          #utilizamos la paleta invertida para la LEYENDA
+    values = -shp$felicidad_media,          #invertimos el orden (dominio NEGATIVO)
+    title = "Felicidad media",
+    opacity = 0.9,
+    labFormat = labelFormat(digits = 2,
+                            transform = function(x) -x) # eliminamos el valor negativo de los resultados de la leyenda
+  )
+```
+
+### Niveles de felicidad por país {data-width=50}
+```{r}
+# (Previo1) Etiquetas Likert felicidad
+w4_labels <- c("Rara vez o nunca","Algunas veces","A menudo","La mayor parte/siempre")
+
+# (Previo2) Mostrar nombres de países, en lugar de su abreviatura/código ISO2
+#(así, si el trabajo se amplía en el futuro con otros países, se puede reutilizar)
+dicc_paises <- c(
+  "AT" = "Austria",
+  "BE" = "Bélgica",
+  "CZ" = "República Checa",
+  "FI" = "Finlandia",
+  "FR" = "Francia",
+  "GB" = "Reino Unido",
+  "IS" = "Islandia",
+  "IT" = "Italia",
+  "PT" = "Portugal",
+  "SE" = "Suecia",
+  "SI" = "Eslovenia"
+)
+#OJO1: el vector de dicc_paises está indexado x códigos (no x nombres)
+estudio <- estudio %>%
+  mutate(cntry_name = dplyr::coalesce(dicc_paises[cntry], cntry))  # crea columna nombres del diccionario
+#OJO2: USAR 'fallback' (red de seguridad) para garantizar las coincidencias abreviatura-nombre de los países en todos los Run, (no sólo en el 1º). Por tanto, hecho así, si no encuentra coincidencia en el diccionario, en lugar de devolver NA (VER #OJO3), usa un valor de respaldo (el 'fallback'), que en este caso es el propio valor original de cntry
+#OJO3: NO USAR estudio %>% mutate(cntry = dicc_paises[cntry]): En 1er Run, cntry tiene códigos ISO2 → se sustituyen por nombres y todo va bien. En ejecuciones posteriores: cntry ya son nombres, y dicc_paises[cntry] devuelve NA (porque el vector está indexado por códigos, no por nombres)
+
+
+# --- 1) Paleta azul coherente con el mapa (4 niveles) ---
+pal_likert <- colorRampPalette(c("#E8F1FF", "#B3D4FF", "#66AAFF", "#1F78FF"))(4)
+# Resultado: 1 = muy claro … 4 = azul intenso
+
+# --- 2) Ordenar países por felicidad media ponderada
+orden_df <- estudio %>%
+  filter(!is.na(cntry_name), !is.na(w4q50), !is.na(c2weight)) %>%
+  group_by(cntry_name) %>%
+  summarise(felicidad_media = sum(w4q50 * c2weight, na.rm = TRUE) / sum(c2weight, na.rm = TRUE),
+            .groups = "drop")
+
+bars_df <- estudio %>%
+  filter(!is.na(cntry_name), !is.na(w4q50), !is.na(c2weight)) %>%
+  count(cntry_name, w4q50, wt = c2weight, name = "w") %>%
+  group_by(cntry_name) %>%
+  mutate(prop = w / sum(w, na.rm = TRUE)) %>%
+  ungroup() %>%
+  # unir felicidad media para ordenar
+  left_join(orden_df, by = "cntry_name") %>%
+  # ordenar países de menor a mayor felicidad media
+  mutate(cntry_name = forcats::fct_reorder(cntry_name, felicidad_media, .fun = mean, .na_rm = TRUE))
+
+# --- 3) Gráfico de barras apiladas horizontales coherente con el mapa ---
+p_barras <- ggplot(
+  bars_df,
+  aes(
+    y = cntry_name,
+    x = prop,
+    fill = factor(w4q50, levels = 1:4, labels = w4_labels)
+  )
+) +
+  geom_col(width = 0.8) +
+  scale_x_continuous(labels = scales::percent) +
+  # Paleta azul con orden claro→intenso (menos→más felicidad)
+  scale_fill_manual(
+    values = pal_likert,
+    breaks = w4_labels,      # asegura el orden en la leyenda
+    labels = w4_labels,
+    guide  = guide_legend(reverse = TRUE)  # leyenda de más→menos (intenso arriba), opcional
+  ) +
+  labs(
+    x = "Proporción",
+    y = NULL,
+    fill = "Felicidad",
+    title = "Distribución por país de niveles de felicidad"
+  ) +
+  theme_minimal(base_size = 11) +
+  theme(
+    legend.position = "right",
+    panel.grid.major.y = element_blank()
+  )
+
+plotly::ggplotly(p_barras)
+```
+
+Row
+-------------------------------------
+### {.well}
+
+Podemos ver en el mapa que la felicidad media en los países europeos encuestados se enmarca en una frecuencia de sentirse feliz "A veces" (al encontrarse dentro de la escala de puntuación 2), fluctuando el nivel de felicidad entre países a partir de sus puntuaciones decimales.
+
+<br>
+
+En este sentido, si observamos tanto el mapa como el diagrama, veremos que existen **diferencias entre países**, por ejemplo:
+
+- El país con mayor frecuencia de felicidad obtenido fue **Eslovenia**, con una **media de 2.84**, reflejando una tendencia de felicidad de casi "A menudo" (puntuación 3), la cual se observa prácticamente al 70% de la proporción de respuestas de sus encuestados en el Diagrama de barras.
+
+- El **país con más puntuaciones de felicidad de nivel 4 (frecuencia "La mayor parte/Siempre") fue Bélgica**, cuya media de felicidad se posicionó como la segunda mejor: 2.78.
+
+- Países como **R. Checa e Italia mostraron las medias de felicidad más bajas**, así como la mayor cantidad de puntuaciones 1 de felicidad (sentirse feliz "Rara vez/Nunca") obtenidas.
+
+
+# FELICIDAD POR GÉNERO Y TIPO DE ACTIVIDAD
+
+Row {data-height=450}
+-------------------------------------
+
+### ¿Son más felices los hombres que las mujeres? {data-width=50}
+```{r}
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+library(plotly)
+library(purrr)
+
+# ------------------ Configuración ------------------
+w4_palette <- c("#E8F1FF", "#B3D4FF", "#66AAFF", "#1F78FF")
+w4_labels  <- c("Rara vez o nunca","Algunas veces","A menudo","La mayor parte/siempre")
+
+# Detectamos nombres de columnas
+gender_col <- intersect(c("gndr","gender","sexo","sex"), names(estudio))[1]
+w_col      <- intersect(c("w4q50","felicidad","happy"),      names(estudio))[1]
+wt_col     <- intersect(c("c2weight","weight","peso"),       names(estudio))[1]
+
+if (length(gender_col) == 0) stop("No se encontró la columna de género (gndr/gender/sexo/sex).")
+if (length(w_col) == 0)      stop("No se encontró la columna de felicidad (w4q50/felicidad/happy).")
+if (length(wt_col) == 0)     stop("No se encontró la columna de peso (c2weight/weight/peso).")
+
+# ------------------ 1) Agregación ponderada ------------------
+agg <- estudio %>%
+  filter(!is.na(.data[[gender_col]]),
+         !is.na(.data[[w_col]]),
+         !is.na(.data[[wt_col]])) %>%
+  mutate(
+    gndr  = as.integer(.data[[gender_col]]),      # 1=hombres, 2=mujeres
+    w4q50 = as.integer(.data[[w_col]]),           # niveles 1..4
+    w     = as.numeric(.data[[wt_col]])
+  ) %>%
+  group_by(gndr, w4q50) %>%
+  summarise(
+    w_sum = sum(w, na.rm = TRUE),   # N ponderado en el nivel
+    n_sum = n(),                    # n sin ponderar en el nivel
+    .groups = "drop"
+  ) %>%
+  group_by(gndr) %>%
+  mutate(
+    total_w   = sum(w_sum),
+    total_n   = sum(n_sum),
+    prop      = w_sum / total_w,
+    pct_exact = 100 * prop          # % con decimales
+  ) %>%
+  ungroup()
+
+# ------------------ 2) Redondeo a 100 celdas por género ------------------
+agg_int <- agg %>%
+  arrange(gndr, w4q50) %>%
+  group_by(gndr) %>%
+  group_modify(~{
+    p <- .x$pct_exact
+    base <- floor(p)
+    remainder <- 100 - sum(base)
+    add <- rep(0, length(p))
+    if (remainder > 0) {
+      add[order(p - base, decreasing = TRUE)[seq_len(remainder)]] <- 1
+    }
+    .x$pct_int <- base + add
+    .x
+  }) %>%
+  ungroup()
+
+# ------------------ 3) Expandimos a 100 celdas y coordenadas 10x10 --------
+waffle_cells <- agg_int %>%
+  group_by(gndr) %>%
+  arrange(w4q50, .by_group = TRUE) %>%
+  group_modify(~{
+    # Repetimos el nivel w4q50 tantas veces como celdas le correspondan
+    levels_vec <- rep(.x$w4q50, .x$pct_int)      # longitud 100 garantizada
+    tibble(
+      gndr  = .x$gndr[1],
+      idx   = seq_along(levels_vec),
+      w4q50 = levels_vec
+    )
+  }) %>%
+  ungroup() %>%
+  group_by(gndr) %>%
+  mutate(
+    row = ((idx - 1) %/% 10) + 1,
+    col = ((idx - 1) %% 10) + 1
+  ) %>%
+  ungroup()
+
+# ------------------ 4) Unimos métricas para el tooltip ---------------------
+waffle_cells <- waffle_cells %>%
+  left_join(
+    agg_int %>% select(gndr, w4q50, pct_exact, w_sum, n_sum, total_w, total_n),
+    by = c("gndr","w4q50")
+  ) %>%
+  mutate(
+    gndr_lbl = factor(gndr, levels = c(1,2), labels = c("Hombres","Mujeres")),
+    w4_lbl   = factor(w4q50, levels = 1:4, labels = w4_labels),
+    fill_key = w4_lbl,
+    text = paste0(
+      "<b>", gndr_lbl, "</b><br>",
+      "Nivel: ", w4_lbl, "<br>",
+      sprintf("%% ponderado: %.1f%%", pct_exact), "<br>",
+      "N ponderado nivel/total: ", sprintf("%.0f", w_sum), " / ", sprintf("%.0f", total_w), "<br>",
+      "n sin ponderar nivel/total: ", n_sum, " / ", total_n
+    )
+  )
+
+# ------------------ 5) Gráfico + hover -------------------------------------
+p <- ggplot(
+  waffle_cells,
+  aes(x = col, y = row, fill = fill_key, text = text)
+) +
+  geom_tile(color = "white", linewidth = 0.6) +
+  scale_y_reverse() +
+  scale_x_continuous(expand = c(0,0)) +
+  coord_equal() +
+  facet_wrap(~ gndr_lbl, nrow = 1) +
+  scale_fill_manual(
+    name   = "Felicidad",
+    values = setNames(w4_palette, w4_labels),
+    breaks = w4_labels,
+    labels = w4_labels
+  ) +
+  labs(
+    title    = "Distribución global de niveles de felicidad (ponderado)",
+    subtitle = "Waffle 10×10 por género — w4q50 (1=menos, 4=más)",
+    x = NULL, y = NULL
+  ) +
+  theme_minimal(base_size = 12) +
+  theme(
+    strip.text = element_text(face = "bold"),
+    panel.grid = element_blank()
+  )
+
+ggplotly(p, tooltip = "text")
+
+```
+
+### ¿Una persona que trabaja es más feliz que un desempleado? {data-width=50}
+```{r}
+library(dplyr)
+library(ggplot2)
+library(forcats)
+library(plotly)
+
+# Diccionario código -> etiqueta
+mnactic_lu <- tibble::tibble(
+  mnactic = 1:9,
+  actividad = c(
+    "Trabajo remunerado","Educación","Desempleo (buscando)","Desempleo (no busca)",
+    "Enfermo/discapacidad","Jubilado","Serv. comunitario/militar",
+    "Tareas del hogar/cuidado","Otro"
+  )
+)
+
+# Agregado + pegado de etiquetas + orden descendente (categoría con + felicidad arriba)
+lolli_df <- estudio %>%
+  filter(!is.na(mnactic), !is.na(w4q50), !is.na(c2weight)) %>%
+  group_by(mnactic) %>%
+  summarise(
+    media_felicidad = sum(w4q50 * c2weight, na.rm = TRUE) / sum(c2weight, na.rm = TRUE),
+    n_w = sum(c2weight, na.rm = TRUE),
+    .groups = "drop"
+  ) %>%
+  left_join(mnactic_lu, by = "mnactic") %>%
+  mutate(actividad = forcats::fct_reorder(actividad, media_felicidad, .desc = TRUE))
+
+p_lolli <- ggplot(
+  lolli_df,
+  aes(
+    x = media_felicidad,
+    y = actividad,
+    text = paste0(
+      "Actividad: ", actividad, "<br>",
+      "Felicidad media (w): ", round(media_felicidad, 2), "<br>",
+      "N ponderado: ", scales::comma(round(n_w, 0))
+    )
+  )
+) +
+  geom_segment(aes(x = 0, xend = media_felicidad, yend = actividad),
+               color = "#B3D4FF", linewidth = 4, lineend = "round") +
+  geom_point(color = "#1F78FF", size = 4) +
+  scale_y_discrete(limits = rev(levels(lolli_df$actividad))) +
+  labs(x = "Felicidad media (ponderada)", y = NULL,
+       title = "Ranking global de felicidad media por actividad") +
+  theme_minimal(base_size = 12) +
+  theme(plot.title = element_text(face = "bold", color = "#1F78FF"))
+
+plotly::ggplotly(p_lolli, tooltip = "text")
+```
+
+Row
+-------------------------------------
+### {.well}
+
+El gráfico de la izquierda representa, a través de las diferentes celdas/cuadrículas, la proporción de cada frecuencia (nivel) de felicidad alcanzado en las puntuaciones de encuesta, tanto de hombres como mujeres: podemos observar que los hombres puntúan algo menos que las mujeres en sentirse felices "Rara vez o nunca", así como algo más en "A menudo". Sin embargo, **no se revelan diferencias reales de felicidad entre hombres y mujeres**.
+
+<br>
+
+El gráfico de la derecha muestra, en forma de ranking, las actividades en función de su media de felicidad: todas ellas de nuevo dentro del espacio de puntuación 2 (felicidad "A veces"). Podemos observar por ejemplo que **las personas que trabajan (Trabajo remunerado) no puntuaban mucha mayor felicidad (2.67) que aquellos caracterizados por tareas del hogar o cuidado (2.63)**. A su vez, las categorías de desempleado buscando trabajo y el desempleado que no busca, se mostraron muy parejas en sus medias obtenidas.
+
+
+# FELICIDAD y otras variables
+
+Row {data-height=140}
+-------------------------------------
+
+### Codificación
+USO DE INTERNET: frecuencia medida desde **1** (Nunca) hasta **5** (Cada día)
+
+NIVEL EDUCATIVO: medido desde **1** (< Secundaria) hasta **7** (Postgrado)
+
+PERCEPCIÓN INGRESOS: valoración desde **1** (Difícil) hasta **4** (Vivir cómodamente)
+
+Row {data-height=600}
+-------------------------------------
+
+### USO DE INTERNET 
+```{r}
+#USO DE INTERNET
+estudio1 <- estudio %>%
+  filter(!is.na(netusoft), !is.na(w4q50), !is.na(cntry_name))
+#cntry_name para nombre de países (no su código: RECORDAR código DIAGRAMA DE BARRAS)
+
+# Matriz de dispersión (con línea de tendencia) por países
+internet <- ggplot(estudio1, aes(x = netusoft, y = w4q50, weight = c2weight)) +
+  geom_jitter(width = 0.15, height = 0.10, alpha = 0.25) +
+  geom_smooth(method = "lm", formula = y ~ x, aes(weight = c2weight), se = FALSE, color = "blue") +
+  facet_wrap(~cntry_name) +
+  scale_x_continuous(breaks = 1:5) +
+  scale_y_continuous(breaks = 1:4, labels = c("Rara vez","Algunas veces","A menudo","La mayor parte/siempre")) +
+  labs(x = "Uso de internet",
+       y = "Felicidad",
+       title = "Tendencia ponderada por país") +
+  theme_minimal()
+
+plotly::ggplotly(internet)
+```
+
+### NIVEL EDUCATIVO 
+```{r}
+#NIVEL EDUCACION
+estudio2 <- estudio %>%
+  filter(!is.na(eisced), !is.na(w4q50), !is.na(cntry_name))
+
+educat <- ggplot(estudio2, aes(x = eisced, y = w4q50, weight = c2weight)) +
+  geom_jitter(width = 0.15, height = 0.10, alpha = 0.25) +
+  geom_smooth(method = "lm", formula = y ~ x, aes(weight = c2weight), se = FALSE, color = "blue") +
+  facet_wrap(~cntry_name) +
+  scale_x_continuous(breaks = 1:7) +
+  scale_y_continuous(breaks = 1:4, labels = c("Rara vez","Algunas veces","A menudo","La mayor parte/siempre")) +
+  labs(x = "Nivel de educación",
+       y = "Felicidad",
+       title = "Tendencia ponderada por país") +
+  theme_minimal()
+
+plotly::ggplotly(educat)
+```
+
+### PERCEPCIÓN INGRESOS 
+```{r}
+#SENTIMIENTOS SOBRE INGRESOS
+estudio3 <- estudio %>%
+  filter(!is.na(hincfel), !is.na(w4q50), !is.na(cntry_name)) %>%
+  mutate(hincfel_inv = 5 - hincfel) #invertimos ítems de la variable
+#CLAVE: INVERTIR LA ESCALA DE CODIFICACIÓN DE hincfel
+#Que los 3 gráficos transmitan de forma visual el mismo mensaje ("posible tendencia ascendente")
+#Justificación: dar coherencia visual al público (atendiendo a los otros 2 gráficos) y reducir ruido cognitivo
+
+ingreso <- ggplot(estudio3, aes(x = hincfel_inv, y = w4q50, weight = c2weight)) +
+  geom_jitter(width = 0.15, height = 0.10, alpha = 0.25) +
+  geom_smooth(method = "lm", formula = y ~ x, aes(weight = c2weight), se = FALSE, color = "blue") +
+  facet_wrap(~cntry_name) +
+  scale_x_continuous(breaks = 1:4) +
+  scale_y_continuous(breaks = 1:4, labels = c("Rara vez","Algunas veces","A menudo","La mayor parte/siempre")) +
+  labs(x = "Percepción ingresos",
+       y = "Felicidad",
+       title = "Tendencia ponderada por país") +
+  theme_minimal()
+
+plotly::ggplotly(ingreso)
+```
+
+Row
+-------------------------------------
+### {.well}
+
+Los gráficos presentes (por ejemplo, variable Uso de internet) se han planteado en base a esta lógica visual: "identificar si, a mayor nivel de variable (Uso de internet), aumenta la puntuación de felicidad":" esto se revelaría a través de una línea ascendente: relación positiva. En caso de una posible relación negativa ("a mayor nivel de uso de internet, la felicidad disminuye") la línea sería descendente.
+
+El color más oscuro en algunas categorías de respuesta, representa una mayor cantidad de encuestados que respondieron dicha categoría.
+
+<br>
+
+
+**USO INTERNET**: Los gráficos muestran una **relación débil entre el nivel de uso de internet con una mayor/menor felicidad en la mayoría de países**, observándose una tendencia mayormente horizontal entre las frecuencias de felicidad "Algunas veces" (puntuación 2) y "A menudo" (puntuación 3). No obstante, se puede apreciar cierta tendencia descendente en la población de **Finlandia**, sugiriendo que a más uso de internet, los fineses pueden descender su nivel de felicidad. Por su parte, **Suecia** sí refleja una mayor relación ascendente entre el uso de internet y la frecuencia de felicidad que el resto de países.
+
+
+**NIVEL EDUCATIVO**: El nivel de estudios no parece relacionarse con la felicidad en gran medida, reflejando escasa tendencia lineal en ningún país, excepto República Checa con una mayor inclinación positiva 'más estudios - más felicidad'. Por tanto el **nivel de estudios no es un predictor fuerte de felicidad**.
+
+
+**PERCEPCIÓN INGRESOS**: El sentimiento sobre los ingresos reveló **mayor relación con la felicidad** que las otras variables, observándose una tendencia favorable en todos los países salvo Italia: esto sugiere que **una mejor (mayor) consideración hacia los ingresos obtenidos puede correlacionar positivamente con la felicidad**: en este sentido, **R.Checa** en primer lugar, y **Finlandia** en segundo lugar, muestran una **relación bastante fuerte**. Respecto a los resultados en **Eslovenia** (RECORDAR: país con la mayor media de felicidad europea), curiosamente, este país **muestra la menor tendencia** posible entre la percepción de ingresos con la felicidad.
+
+<br>
+
+**Otras curiosidades:** En los 3 gráficos de Eslovenia (país con mayor medida de felicidad) podemos observar como todas sus líneas de tendencia se encuentran en la órbita de puntuación 3 de frecuencia de felicidad ("A menudo"). Además este país, en ninguno de los 3 gráficos ha sugerido correlación entre la felicidad con las variables de interés.
+
+
+# TABLA-RESUMEN Y CONCLUSIONES
+
+Row {data-height=450}
+-------------------------------------
+
+```{r}
+library(kableExtra)
+
+# --PREPARACIÓN OBJETOS PARA TABLA RESUMEN
+estudio <- estudio %>%
+  mutate(
+    cntry_name = dplyr::coalesce(dicc_paises[cntry], cntry)
+    )
+
+# Media ponderada por país + total UE
+by_country <- estudio %>%
+  filter(!is.na(w4q50), !is.na(c2weight), !is.na(cntry_name)) %>%
+  group_by(cntry_name) %>%
+  summarise(
+    fel_mean_w = sum(w4q50 * c2weight, na.rm = TRUE) / sum(c2weight, na.rm = TRUE),
+    n_w = sum(c2weight, na.rm = TRUE),
+    .groups = "drop"
+  )
+
+eu_mean <- with(estudio %>% filter(!is.na(w4q50), !is.na(c2weight)),
+                sum(w4q50 * c2weight, na.rm=TRUE) / sum(c2weight, na.rm=TRUE))
+
+top_cty <- by_country %>% slice_max(fel_mean_w, n = 1) %>% select(cntry_name, fel_mean_w)
+bot_cty <- by_country %>% slice_min(fel_mean_w, n = 1) %>% select(cntry_name, fel_mean_w)
+
+# Brecha por género (H - M)
+gender_df <- estudio %>%
+  filter(!is.na(w4q50), !is.na(c2weight), gndr %in% c(1,2)) %>%
+  group_by(gndr) %>%
+  summarise(fel_mean_w = sum(w4q50 * c2weight, na.rm = TRUE) / sum(c2weight, na.rm = TRUE), .groups="drop") %>%
+  pivot_wider(names_from = gndr, values_from = fel_mean_w, names_prefix = "g")
+gender_gap <- (gender_df$g1 - gender_df$g2)[1]
+
+
+# Actividad con mayor felicidad media
+mn_lu <- tibble::tibble(
+  mnactic = 1:9,
+  actividad = c("Trabajo remunerado","Educación","Desempleo (buscando)","Desempleo (no busca)",
+                "Enfermo/discapacidad","Jubilado","Serv. comunitario/militar",
+                "Tareas del hogar/cuidado","Otro")
+)
+by_activity <- estudio %>%
+  filter(!is.na(mnactic), !is.na(w4q50), !is.na(c2weight)) %>%
+  group_by(mnactic) %>%
+  summarise(fel_mean_w = sum(w4q50 * c2weight, na.rm = TRUE) / sum(c2weight, na.rm = TRUE),
+            .groups = "drop") %>%
+  left_join(mn_lu, by="mnactic")
+top_act <- by_activity %>% slice_max(fel_mean_w, n = 1) %>% select(actividad, fel_mean_w)
+bot_act <- by_activity %>% slice_min(fel_mean_w, n = 1) %>% select(actividad, fel_mean_w)
+
+tabla_resumen <- tibble::tibble(
+  Indicador = c("Media de felicidad (UE, ponderada)",
+                "País con mayor felicidad",
+                "País con menor felicidad",
+                "Media felicidad Hombres",
+                "Media felicidad Mujeres",
+                "Brecha por género (H - M, puntos Likert)",
+                "Actividad con mayor felicidad",
+                "Actividad con menor felicidad"),
+  Valor = c(
+    sprintf("%.2f", eu_mean),
+    paste0(top_cty$cntry_name, " (", sprintf("%.2f", top_cty$fel_mean_w), ")"),
+    paste0(bot_cty$cntry_name, " (", sprintf("%.2f", bot_cty$fel_mean_w), ")"),
+    sprintf("%.2f", gender_df$g1),
+    sprintf("%.2f", gender_df$g2),
+    sprintf("%.2f", gender_gap),
+    paste0(top_act$actividad, " (", sprintf("%.2f", top_act$fel_mean_w), ")"),
+    paste0(bot_act$actividad, " (", sprintf("%.2f", bot_act$fel_mean_w), ")")
+  )
+)
+
+# --TABLA RESUMEN
+tabla_resumen %>%
+  kbl(
+    booktabs = TRUE, align = c("l","l"),
+    col.names = c("Indicador","Valor"),
+    caption = "TABLA: ALGUNOS INDICADORES DEL ESTUDIO"
+  ) %>%
+  kable_styling(latex_options = c("striped", "hold_position", "scale_down")) %>%
+  row_spec(0, bold = TRUE, color = "white", background = accent)
+```
+
+Row
+-------------------------------------
+### {.well}
+
+Esta exploración visual sobre la felicidad de los países europeos encuestados en el año 2024 por el ESS nos permite afirmar las siguientes **conclusiones**:
+
+- Todos los países mostraban un nivel de frecuencia de felicidad entre "Algunas veces" (puntuación 2) y "A menudo" (puntuación 3), si bien se observaron múltiples diferencias entre países, siendo `r paste0(top_cty$cntry_name, " (", sprintf("%.2f", top_cty$fel_mean_w), ")")` el país con mayor media de felicidad. El país con menor felicidad fue `r paste0(bot_cty$cntry_name, " (", sprintf("%.2f", bot_cty$fel_mean_w), ")")`. La media europea global fue `r sprintf("%.2f", eu_mean)`.
+
+- Bélgica fue el país con mayores puntuaciones registradas del máximo nivel de frecuencia de felicidad ("La mayor parte/Siempre").
+
+- No existen diferencias en relación a la felicidad entre hombres y mujeres en la población encuestada: `r sprintf("%.2f", gender_gap)`.
+
+- La actividad con mayor media de felicidad obtenida fue `r paste0(top_act$actividad, " (", sprintf("%.2f", top_act$fel_mean_w), ")")` y `r paste0(bot_act$actividad, " (", sprintf("%.2f", bot_act$fel_mean_w), ")")` la menor.
+
+- Variables como el sentimiento hacia los ingresos (permitir vivir peor o mejor en función de éstos) sugieren en la mayoría de países una correlación con la felicidad de la siguiente forma: "a mayor percepción de calidad de vida con los ingresos, mayor puntuación de felicidad". Variables como el uso de internet o el nivel educativo no muestran una tendencia clara, exceptuando en algunos países.
+
+- Eslovenia (país con la mayor media de felicidad) no ha mostrado ninguna relación clara con variables como el uso de internet, tipo de estudios, o la percepción de los ingresos, por lo que la felicidad en ese país depende de factores distintos a los abarcados desde este estudio. 
+
+<br>
+
+**REFLEXIÓN FINAL**: la felicidad debe comprenderse como un constructo complejo, sujeto a multitud de influencias, factores y variabilidad. Las presentes conclusiones ofrecen un acercamiento al estudio de la felicidad, que deberá ser enrriquecido con otras técnicas, hipótesis, e incluso nuevos datos y variables.
+
+Será de especial relevancia (social, científica, e incluso legal/política) seguir esa línea de profundizar el estudio de la felicidad en el espacio europeo, pudiendo en el futuro (ante los hipotéticos hallazgos obtenidos) definir iniciativas como medidas económicas, de ocio, laborales, etc.
+
+
+
+<!-- EJECUTAR Y GUARDAR PRESENTACIÓN -->
+```{r}
+# Ante posible ausencia del botón Knit, DESCOMENTAR Y EJECUTAR ESTE CÓDIGO ¡¡EN CONSOLA!!:
+#rmarkdown::render(
+#  "Presentacion/CODIGO_Presentacion.Rmd",
+#  output_format = "flexdashboard::flex_dashboard",
+#  output_file   = "Presentacion.html",
+#  output_dir    = "Presentacion",
+#  clean = TRUE,
+#  envir = new.env()
+#)
+```
+
